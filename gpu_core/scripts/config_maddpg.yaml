@@ -1,0 +1,167 @@
+# ============================================================================
+# MADDPG BASELINE CONFIG - Hex-level MADDPG (fair-comparison aligned)
+# ============================================================================
+# Fairness policy:
+# - Environment/data/reward/physics/vehicle/station/network are aligned to
+#   config_wdro_mod.yaml / config_sac.yaml.
+# - Keep only MADDPG-critical knobs different (off-policy MADDPG-specific).
+#
+# CLI example:
+#   python gpu_core/scripts/train.py \
+#     --config gpu_core/scripts/config_maddpg.yaml \
+#     --real-data data/nyc_full/trips_processed.parquet \
+#     --trip-sample 0.2 --target-h3-resolution 8
+# ============================================================================
+
+environment:
+  num_vehicles: 1000
+  num_hexes: 3985
+  num_stations: 150
+
+episode:
+  duration_hours: 12.0
+  step_duration_minutes: 5
+
+data:
+  parquet_path: "data/nyc_full/trips_processed.parquet"
+  trip_percentage: 0.2
+  prefetch_episodes: 5
+  start_date: "2009-01-01"
+  target_h3_resolution: 8
+  max_hex_count: 4000
+
+training:
+  # Algorithm select from YAML (no CLI flag required)
+  algo: maddpg
+
+  total_episodes: 500
+  batch_size: 128
+  episode_batch_size: 4
+
+  # Aligned global LR section (MADDPG uses maddpg_* LR fields below)
+  learning_rate:
+    actor: 5.0e-5
+    critic: 1.0e-4
+    alpha: 5.0e-5
+
+  # Aligned horizon with SAC/WDRO
+  gamma: 0.995
+
+  warmup_steps: 1000
+  update_every: 1
+  max_grad_norm: 1.0
+  mixed_precision: true
+  compile_model: false
+
+  # MADDPG-critical settings
+  maddpg_lr_actor: 1.0e-4
+  maddpg_lr_critic: 1.0e-3
+  maddpg_buffer_capacity: 5000
+  maddpg_tau: 0.005
+  maddpg_gumbel_tau: 0.5
+  maddpg_action_embed_dim: 64
+  maddpg_eps_start: 0.3
+  maddpg_eps_end: 0.05
+  maddpg_eps_decay_episodes: 200
+  maddpg_reward_mix_alpha: 0.4
+  maddpg_use_execution_soft_weight: false
+  maddpg_repos_khop: 4
+  maddpg_max_k_neighbors: 0
+
+replay_buffer:
+  capacity: 100000
+  prioritized: false
+  alpha: 0.6
+  beta_start: 0.4
+  beta_end: 1.0
+  beta_annealing_steps: 200000
+
+reward:
+  driving_cost_per_km: 0.30
+  electricity_cost_per_kwh: 0.18
+  wait_penalty_per_step: 0.03
+  drop_penalty_per_order: 0.5
+  scale_factor: 100.0
+  max_wait_steps: 6
+
+  high_soc_charge_penalty: 0.5
+  very_high_soc_charge_penalty: 0.5
+
+  serve_bonus: 0.0
+  serve_fail_penalty: 0.2
+  reposition_penalty: 0.0
+  reposition_success_bonus: 0.0
+  reposition_action_bonus: 0.0
+
+  reposition_dispatch_bonus: 0.3
+  reposition_dispatch_demand_cap: 25.0
+  reposition_dispatch_per_vehicle_cap: 0.3
+
+physics:
+  energy_per_km: 0.2
+  avg_speed_kmh: 25.0
+  max_soc: 100.0
+  min_soc_reserve: 10.0
+  charge_power_kw: 50.0
+
+vehicle:
+  initial_soc: 80.0
+  soc_low_threshold: 20.0
+  soc_med_threshold: 50.0
+  soc_charge_interrupt_threshold: 90.0
+
+station:
+  max_power: 50.0
+  electricity_price: 0.18
+  price_per_kwh: 0.18
+  num_ports: 5
+  placement_mode: demand_spaced
+  radius_hops: 4
+  fallback_mode: fill_by_demand
+
+network:
+  actor_hidden_dims: [256, 256]
+  critic_hidden_dims: [256, 256]
+  hex_embedding_dim: 64
+  gcn_hidden_dims: [128, 128]
+  gcn_output_dim: 64
+  dropout: 0.1
+
+fleet_actor:
+  repos_khop: 4
+  hex_vehicle_agg_dim: 8
+  hex_decision_hidden_dim: 256
+  entropy_target_ratio: 0.5
+  assignment_soc_priority: true
+
+entropy:
+  auto_alpha: true
+  initial_alpha: 0.30
+  target_entropy_ratio: 0.40
+  min_alpha: 0.10
+  max_alpha: 0.60
+
+distributed:
+  enabled: false
+  backend: "nccl"
+  gpus: null
+
+checkpoint:
+  checkpoint_dir: "checkpoint/maddpg"
+  save_interval: 100
+  save_best: true
+  keep_last: 5
+
+logging:
+  log_dir: "logs/maddpg"
+  log_interval: 10
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: "ev-fleet-rl"
+
+debug:
+  profile_gpu: false
+  log_memory: false
+  benchmark_cudnn: true
+  deterministic: false
+  seed: 42

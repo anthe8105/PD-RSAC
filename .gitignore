@@ -1,0 +1,40 @@
+simulation_results
+venv
+__pycache__
+*.pyc
+.idea
+*.xml
+*.iml
+
+# Large data files - DO NOT COMMIT
+*.parquet
+*.pth
+*.pt
+*.h5
+*.hdf5
+*.npz
+*.npy
+
+# Dataset files
+yellow_tripdata_*.parquet
+Wasserstein/data/nyc_full/trips_processed.parquet
+Wasserstein/data/nyc_real/trips_processed.parquet
+Wasserstein/data/*/trips_processed.parquet
+
+# Checkpoints and models
+checkpoints/
+*.ckpt
+experiment/
+*.log
+Highs.log
+
+# Large output files
+*.csv
+!requirements.txt
+sampledata.csv
+
+# Temporary files
+temp_*
+*.tmp
+.DS_Store
+Python-3.10.14/

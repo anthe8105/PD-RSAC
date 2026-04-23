@@ -1,0 +1,258 @@
+# ============================================================================
+# WDRO CONFIG - EV Fleet RL Training (PD-RSAC per IEEE_T_IV.pdf)
+# ============================================================================
+# Based on config_sac.yaml. Reward/physics parameters are kept IDENTICAL to
+# SAC for fair comparison. Training hyperparameters differ from SAC only where
+# WDRO+Semi-MDP creates structural differences:
+#   - repos_aux_weight: 0.25 (vs SAC 0.1) — Semi-MDP γ^Δ discounts repos
+#     travel time, so repos Q-values are depressed; stronger supervision needed
+#   - tau: 0.005 (vs SAC 0.002) — WDRO robust backup is noisier than standard
+#     SAC backup; faster Polyak averaging stabilises target network
+#   - auto_alpha: true (same as SAC) — rising alpha maintains exploration,
+#     letting the policy discover charging before committing to SERVE-only
+# ============================================================================
+# CLI INVOCATION:
+#   python train.py --config config_wdro_mod.yaml --wdro --semi-mdp \
+#       --initial-temperature 1.0 \
+#       --final-temperature 0.3 \
+#       --temperature-decay-episodes 400
+# NOTE: --temperature-annealing is default=True in argparse. Temperature now
+#   controls sampling sharpness ONLY (passed to actor during episode collection).
+#   auto_alpha in the config controls the entropy weight in the loss function
+#   independently — the two are decoupled. alpha is gradient-tuned like SAC.
+# ============================================================================
+
+environment:
+  num_vehicles: 1000
+  num_hexes: 3985
+  num_stations: 150
+
+episode:
+  duration_hours: 12.0
+  step_duration_minutes: 5
+
+# ============================================================================
+# DATA SETTINGS
+# ============================================================================
+data:
+  parquet_path: "data/nyc_full/trips_processed.parquet"
+  trip_percentage: 0.2
+  prefetch_episodes: 5
+  start_date: "2009-01-01"
+  target_h3_resolution: 8
+  max_hex_count: 4000
+
+# ============================================================================
+# TRAINING HYPERPARAMETERS
+# ============================================================================
+training:
+  total_episodes: 500
+
+  batch_size: 128
+  episode_batch_size: 4
+
+  learning_rate:
+    actor: 5.0e-5
+    critic: 1.0e-4
+    alpha: 5.0e-5     # Unused when auto_alpha: false
+
+  # 12h episodes → 144 steps/episode.
+  # gamma=0.995 keeps a long delayed-payoff horizon for charging/repositioning
+  # without needing to re-scale the episode-count-based schedules below.
+  gamma: 0.995
+
+  # Soft update coefficient (Polyak averaging)
+  # WDRO: 0.005 (SAC uses 0.002)
+  # WDRO robust backup adds noise to Q-targets (worst-case scenario search +
+  # λρ penalty). Faster Polyak averaging keeps the target network tracking
+  # these noisier estimates without large oscillations. SAC can afford the
+  # slower 0.002 with clean standard backup targets.
+  tau: 0.005
+
+  warmup_steps: 10000
+  update_every: 1
+
+  # NOTE: max_grad_norm is dead code — all trainers hardcode max_norm=1.0.
+  max_grad_norm: 0.2
+
+  # Reposition head auxiliary loss weight
+  # WDRO: 0.25 (SAC uses 0.1)
+  # The repos head has zero gradient from the SAC discrete loss regardless of
+  # training mode. In WDRO+Semi-MDP, repos is doubly penalised: (1) Q-targets
+  # are deflated by the robust penalty (-λρ) and (2) Semi-MDP γ^Δ discounting
+  # gives repos a smaller effective discount because travel takes time (Δ>1).
+  # The aux loss is the ONLY training signal for the repos head; at 0.1 it is
+  # too weak to prevent collapse under this combined pressure.
+  repos_aux_weight: 0.25
+
+  mixed_precision: true
+  compile_model: false
+
+# ============================================================================
+# REPLAY BUFFER
+# ============================================================================
+replay_buffer:
+  capacity: 100000
+  prioritized: false
+  alpha: 0.6
+  beta_start: 0.4
+  beta_end: 1.0
+  # 500 eps × 144 steps = 72k training steps; anneal beta over most of that
+  beta_annealing_steps: 200000
+
+# ============================================================================
+# REWARD FUNCTION (Paper Eq. 8) — IDENTICAL TO SAC
+# ============================================================================
+# r_t = trip_revenue - driving_cost - electricity_cost - wait_penalty - drop_penalty
+# All coefficients kept the same as config_sac.yaml for fair comparison.
+# ============================================================================
+reward:
+  driving_cost_per_km: 0.30
+  electricity_cost_per_kwh: 0.18
+  wait_penalty_per_step: 0.03
+  drop_penalty_per_order: 0.5
+  scale_factor: 100.0
+  max_wait_steps: 6
+
+  high_soc_charge_penalty: 0.5
+  very_high_soc_charge_penalty: 0.5
+
+  serve_bonus: 0.0
+  serve_fail_penalty: 0.2
+  reposition_penalty: 0.0
+  reposition_success_bonus: 0.0
+  reposition_action_bonus: 0.0
+
+  reposition_dispatch_bonus: 0.3
+  reposition_dispatch_demand_cap: 25.0
+  reposition_dispatch_per_vehicle_cap: 0.3
+
+# ============================================================================
+# PHYSICS PARAMETERS — IDENTICAL TO SAC
+# ============================================================================
+physics:
+  energy_per_km: 0.2
+  avg_speed_kmh: 25.0
+  max_soc: 100.0
+  min_soc_reserve: 10.0
+  charge_power_kw: 50.0
+
+# ============================================================================
+# VEHICLE SETTINGS — IDENTICAL TO SAC
+# ============================================================================
+vehicle:
+  initial_soc: 80.0
+  soc_low_threshold: 20.0
+  soc_med_threshold: 50.0
+  soc_charge_interrupt_threshold: 90.0
+
+# ============================================================================
+# CHARGING STATIONS — IDENTICAL TO SAC
+# ============================================================================
+station:
+  max_power: 50.0
+  electricity_price: 0.18
+  price_per_kwh: 0.18
+  num_ports: 5
+  placement_mode: demand_spaced
+  radius_hops: 4
+  fallback_mode: fill_by_demand
+
+# ============================================================================
+# NETWORK ARCHITECTURE — IDENTICAL TO SAC
+# ============================================================================
+network:
+  actor_hidden_dims: [256, 256]
+  critic_hidden_dims: [256, 256]
+  hex_embedding_dim: 64
+  gcn_hidden_dims: [128, 128]
+  gcn_output_dim: 64
+  dropout: 0.1
+
+# ============================================================================
+# FLEET-LEVEL ACTOR
+# ============================================================================
+# The fleet actor outputs per-hex action allocations [P(serve), P(charge),
+# P(repos)] instead of per-vehicle decisions. A deterministic assignment
+# layer maps hex allocations to individual vehicles.
+# ============================================================================
+fleet_actor:
+  repos_khop: 4                    # K-hop neighborhood for reposition targets (~61 hexes at K=4)
+  hex_vehicle_agg_dim: 8           # Aggregated vehicle summary dimension per hex
+  hex_decision_hidden_dim: 256     # Hex decision encoder hidden dim
+  entropy_target_ratio: 0.5        # Target entropy ratio (tunable)
+  assignment_soc_priority: true    # Low-SOC vehicles assigned to CHARGE first
+
+# ============================================================================
+# ENTROPY SETTINGS
+# ============================================================================
+# auto_alpha remains OFF in this WDRO config. Temperature annealing
+# (--temperature-annealing) only affects collection-time sampling sharpness.
+# The values below are conservative dormant defaults for the day you turn
+# auto_alpha back on: lower target entropy and tighter alpha bounds reduce
+# the chance of the earlier entropy explosion while still giving the policy
+# room to avoid immediate SERVE collapse.
+# ============================================================================
+entropy:
+  auto_alpha: true
+
+  # Conservative dormant defaults for future auto-alpha runs.
+  initial_alpha: 0.30
+  target_entropy_ratio: 0.40
+  min_alpha: 0.10
+  max_alpha: 0.60
+
+# ============================================================================
+# WDRO PARAMETERS (documentation — passed as CLI args, not read from config)
+# ============================================================================
+# The parameters below are controlled via argparse in train.py.
+# They are listed here for reference alongside the CLI invocation at the top.
+#
+# --wdro-rho 0.3  (train.py default — keep default)
+#   Ambiguity radius ρ. Keep at 0.3 (the default).
+#   Reducing to 0.15 was tried alongside the failed temperature annealing run
+#   and is not independently validated. The primal-dual update (paper Eq. 23)
+#   self-tunes λ to keep actual robustness budget on target regardless.
+#
+# EnhancedTrainingConfig defaults (no CLI override currently):
+#   wdro_inner_steps: 3    — projected gradient ascent steps for ξ* search
+#   wdro_lambda_lr:   0.01 — dual variable λ update rate (paper Eq. 23)
+#   wdro_rho_target:  0.2  — risk budget; λ increases when ρ̂ > rho_target
+
+# ============================================================================
+# DISTRIBUTED TRAINING
+# ============================================================================
+distributed:
+  enabled: false
+  backend: "nccl"
+  world_size: 1
+  gpus: null
+
+# ============================================================================
+# CHECKPOINTING
+# ============================================================================
+checkpoint:
+  checkpoint_dir: "checkpoint/wdro"
+  save_interval: 100
+  save_best: true
+  keep_last: 5
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+logging:
+  log_dir: "logs/wdro"
+  log_interval: 10
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: "ev-fleet-rl"
+
+# ============================================================================
+# DEBUG
+# ============================================================================
+debug:
+  enabled: false
+  log_gradients: false
+  log_activations: false
+  profile: false
+  seed: 42

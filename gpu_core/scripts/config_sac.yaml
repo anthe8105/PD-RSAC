@@ -1,0 +1,206 @@
+# ============================================================================
+# SAC BASELINE CONFIG - EV Fleet RL Training
+# ============================================================================
+# Environment, reward, physics, vehicle, station, and network parameters are
+# IDENTICAL to config_wdro_mod.yaml for fair comparison. Only training-specific
+# hyperparameters differ (no WDRO/Semi-MDP structural adjustments needed).
+# ============================================================================
+# CLI INVOCATION:
+#   python train.py --env-v2 --no-semi-mdp --no-wdro \
+#       --config config_sac.yaml \
+#       --real-data <path>/trips_processed.parquet \
+#       --trip-sample 0.2 --num-vehicles 1000 --episodes 500 \
+#       --target-h3-resolution 8 --checkpoint-dir checkpoint/sac
+# ============================================================================
+
+environment:
+  num_vehicles: 1000
+  num_hexes: 3985
+  num_stations: 150
+
+episode:
+  duration_hours: 12.0
+  step_duration_minutes: 5
+
+# ============================================================================
+# DATA SETTINGS — IDENTICAL TO WDRO
+# ============================================================================
+data:
+  parquet_path: "data/nyc_full/trips_processed.parquet"
+  trip_percentage: 0.2
+  prefetch_episodes: 5
+  start_date: "2009-01-01"
+  target_h3_resolution: 8
+  max_hex_count: 4000
+
+# ============================================================================
+# TRAINING HYPERPARAMETERS
+# ============================================================================
+# Differences from WDRO:
+#   - tau: 0.002 (vs WDRO 0.005) — clean SAC backup is less noisy, slower
+#     Polyak averaging is fine and more stable
+#   - repos_aux_weight: 0.1 (vs WDRO 0.25) — no Semi-MDP gamma^delta
+#     discounting, so repos head doesn't need extra supervision strength
+# ============================================================================
+training:
+  total_episodes: 500
+
+  batch_size: 128
+  episode_batch_size: 4
+
+  learning_rate:
+    actor: 5.0e-5
+    critic: 1.0e-4
+    alpha: 5.0e-5
+
+  gamma: 0.995
+
+  # SAC: 0.002 (vs WDRO 0.005)
+  # Clean standard backup targets allow slower, more stable Polyak averaging.
+  tau: 0.002
+
+  warmup_steps: 10000
+  update_every: 1
+  max_grad_norm: 0.2
+
+  # SAC: 0.1 (vs WDRO 0.25)
+  # No Semi-MDP gamma^delta discounting, so repos head needs less boost.
+  repos_aux_weight: 0.1
+
+  mixed_precision: true
+  compile_model: false
+
+# ============================================================================
+# REPLAY BUFFER — IDENTICAL TO WDRO
+# ============================================================================
+replay_buffer:
+  capacity: 100000
+  prioritized: false
+  alpha: 0.6
+  beta_start: 0.4
+  beta_end: 1.0
+  beta_annealing_steps: 200000
+
+# ============================================================================
+# REWARD FUNCTION (Paper Eq. 8) — IDENTICAL TO WDRO
+# ============================================================================
+reward:
+  driving_cost_per_km: 0.30
+  electricity_cost_per_kwh: 0.18
+  wait_penalty_per_step: 0.03
+  drop_penalty_per_order: 0.5
+  scale_factor: 100.0
+  max_wait_steps: 6
+
+  high_soc_charge_penalty: 0.5
+  very_high_soc_charge_penalty: 0.5
+
+  serve_bonus: 0.0
+  serve_fail_penalty: 0.2
+  reposition_penalty: 0.0
+  reposition_success_bonus: 0.0
+  reposition_action_bonus: 0.0
+
+  reposition_dispatch_bonus: 0.3
+  reposition_dispatch_demand_cap: 25.0
+  reposition_dispatch_per_vehicle_cap: 0.3
+
+# ============================================================================
+# PHYSICS PARAMETERS — IDENTICAL TO WDRO
+# ============================================================================
+physics:
+  energy_per_km: 0.2
+  avg_speed_kmh: 25.0
+  max_soc: 100.0
+  min_soc_reserve: 10.0
+  charge_power_kw: 50.0
+
+# ============================================================================
+# VEHICLE SETTINGS — IDENTICAL TO WDRO
+# ============================================================================
+vehicle:
+  initial_soc: 80.0
+  soc_low_threshold: 20.0
+  soc_med_threshold: 50.0
+  soc_charge_interrupt_threshold: 90.0
+
+# ============================================================================
+# CHARGING STATIONS — IDENTICAL TO WDRO
+# ============================================================================
+station:
+  max_power: 50.0
+  electricity_price: 0.18
+  price_per_kwh: 0.18
+  num_ports: 5
+  placement_mode: demand_spaced
+  radius_hops: 4
+  fallback_mode: fill_by_demand
+
+# ============================================================================
+# NETWORK ARCHITECTURE — IDENTICAL TO WDRO
+# ============================================================================
+network:
+  actor_hidden_dims: [256, 256]
+  critic_hidden_dims: [256, 256]
+  hex_embedding_dim: 64
+  gcn_hidden_dims: [128, 128]
+  gcn_output_dim: 64
+  dropout: 0.1
+
+# ============================================================================
+# FLEET-LEVEL ACTOR — IDENTICAL TO WDRO
+# ============================================================================
+fleet_actor:
+  repos_khop: 4
+  hex_vehicle_agg_dim: 8
+  hex_decision_hidden_dim: 256
+  entropy_target_ratio: 0.5
+  assignment_soc_priority: true
+
+# ============================================================================
+# ENTROPY SETTINGS — IDENTICAL TO WDRO
+# ============================================================================
+entropy:
+  auto_alpha: true
+  initial_alpha: 0.30
+  target_entropy_ratio: 0.40
+  min_alpha: 0.10
+  max_alpha: 0.60
+
+# ============================================================================
+# DISTRIBUTED TRAINING
+# ============================================================================
+distributed:
+  enabled: false
+  backend: "nccl"
+  world_size: 1
+  gpus: null
+
+# ============================================================================
+# CHECKPOINTING
+# ============================================================================
+checkpoint:
+  checkpoint_dir: "checkpoint/sac"
+  save_interval: 100
+  save_best: true
+  keep_last: 5
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+logging:
+  log_dir: "logs/sac"
+  log_interval: 10
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: "ev-fleet-rl"
+
+# ============================================================================
+# DEBUG
+# ============================================================================
+debug:
+  enabled: false
+  log_gradients: false
+  log_activations: false
+  profile: false
+  seed: 42
