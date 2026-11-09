@@ -1,0 +1,17 @@
+base: base.yaml
+training:
+  total_episodes: 500
+  batch_size: 2048
+  learning_rate: {actor: 5.0e-05, critic: 0.0001, alpha: 0.0003}
+  gamma: 0.999
+  tau: 0.005
+  warmup_steps: 288
+  max_grad_norm: 1.0
+  mixed_precision: true
+agent: {hidden_dim: 256, gcn_hidden: 128, emb_dim: 64, key_dim: 64, lr_value: 0.0001, updates_per_step: 1,
+  replay_window: 20, replay_recency: 0.8, tau_start: 1.0, tau_end: 0.3, tau_anneal_fraction: 0.6, init_alpha: 0.01,
+  entropy_ratio_mode: 0.5, entropy_ratio_target: 0.5, entropy_target_power: -1.0, semi_mdp: false, critic_population: true}
+wdro: {enabled: false}
+checkpoint: {checkpoint_dir: checkpoint/sac, save_interval: 100, save_best: true, keep_last: 5}
+logging: {log_dir: logs/sac, log_interval: 1, use_tensorboard: true, use_wandb: false, wandb_project: ev-fleet-rl}
+debug: {seed: 42}

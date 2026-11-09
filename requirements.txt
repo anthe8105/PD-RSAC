@@ -1,0 +1,19 @@
+# Core
+torch>=2.1
+numpy>=1.21
+pandas>=1.5
+pyarrow>=12          # parquet engine used by pandas.read_parquet
+scipy>=1.7
+pyyaml>=6.0
+h3>=4,<5             # the code uses the v4 API (latlng_to_cell, cell_to_parent, grid_ring)
+tqdm>=4.62
+matplotlib>=3.4
+
+# Optimisation (MILP projection). Needs a Gurobi license; point GRB_LICENSE_FILE at it.
+gurobipy>=12,<14
+
+
+tensorboard        # enables --tensorboard
+
+# Tests
+pytest>=8
